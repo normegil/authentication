@@ -7,15 +7,23 @@ import (
 
 	"github.com/normegil/resterrors"
 	"github.com/pkg/errors"
+	"github.com/dgrijalva/jwt-go/request"
+	"github.com/dgrijalva/jwt-go"
+	"fmt"
+	"time"
 )
 
 const USERNAME_KEY = "USERNAME"
+const HEADER_JWT = "Authentication"
+const jwtTokenTimeToLive = 24 * time.Hour
 
 var authenticationError = errors.New("authentication failed")
 
 type Authenticator struct {
 	DAO          UserDAO
 	ErrorHandler resterrors.Handler
+	PrivateKey   string
+	PublicKey    string
 }
 
 func (a Authenticator) Authenticate(h http.Handler) http.Handler {
@@ -24,6 +32,16 @@ func (a Authenticator) Authenticate(h http.Handler) http.Handler {
 		if nil != err {
 			a.ErrorHandler.Handle(w, errors.Wrapf(err, "Could not authenticate request"))
 		}
+
+		token, err := a.EmitToken(a.PrivateKey, jwt.StandardClaims{
+			Subject:   username,
+			ExpiresAt: time.Now().Add(jwtTokenTimeToLive).Unix(),
+		})
+		if err != nil {
+			a.ErrorHandler.Handle(w, errors.Wrapf(err, "Could not emit JWT token"))
+		}
+		w.Header().Add(HEADER_JWT, "Bearer "+token)
+
 		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), USERNAME_KEY, username)))
 	})
 }
@@ -40,7 +58,31 @@ func (a Authenticator) AuthenticateRequest(r *http.Request) (string, error) {
 		}
 		return "", authenticationError
 	}
+
+	token, err := request.ParseFromRequest(r, request.HeaderExtractor{HEADER_JWT}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return a.PublicKey, nil
+	})
+	if err != nil {
+		return "", errors.Wrapf(err, "Parsing token from %s", HEADER_JWT)
+	}
+
+	if token.Valid {
+		claims, ok := token.Claims.(jwt.StandardClaims)
+		if !ok {
+			return "", errors.Wrapf(err, "obtaining standard claims struct from token claims")
+		}
+		return claims.Subject, nil
+	}
+
 	return "", errors.New("no authentication info or unsupported authentication method")
+}
+
+func (a Authenticator) EmitToken(key string, claims jwt.Claims) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodES512, claims)
+	return token.SignedString(key)
 }
 
 func (a Authenticator) basicAuth(username, password string) (bool, error) {

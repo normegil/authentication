@@ -5,12 +5,14 @@ import (
 
 	"context"
 
-	"github.com/normegil/resterrors"
-	"github.com/pkg/errors"
-	"github.com/dgrijalva/jwt-go/request"
-	"github.com/dgrijalva/jwt-go"
+	"crypto/ecdsa"
 	"fmt"
 	"time"
+
+	"github.com/dgrijalva/jwt-go"
+	"github.com/dgrijalva/jwt-go/request"
+	"github.com/normegil/resterrors"
+	"github.com/pkg/errors"
 )
 
 const USERNAME_KEY = "USERNAME"
@@ -22,8 +24,8 @@ var authenticationError = errors.New("authentication failed")
 type Authenticator struct {
 	DAO          UserDAO
 	ErrorHandler resterrors.Handler
-	PrivateKey   string
-	PublicKey    string
+	PrivateKey   *ecdsa.PrivateKey
+	PublicKey    *ecdsa.PublicKey
 }
 
 func (a Authenticator) Authenticate(h http.Handler) http.Handler {
@@ -80,7 +82,7 @@ func (a Authenticator) AuthenticateRequest(r *http.Request) (string, error) {
 	return "", errors.New("no authentication info or unsupported authentication method")
 }
 
-func (a Authenticator) EmitToken(key string, claims jwt.Claims) (string, error) {
+func (a Authenticator) EmitToken(key *ecdsa.PrivateKey, claims jwt.Claims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodES512, claims)
 	return token.SignedString(key)
 }

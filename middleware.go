@@ -9,15 +9,17 @@ import (
 	"fmt"
 	"time"
 
+	"strings"
+
 	"github.com/dgrijalva/jwt-go"
-	"github.com/dgrijalva/jwt-go/request"
 	"github.com/normegil/resterrors"
 	"github.com/pkg/errors"
 )
 
 const USERNAME_KEY = "USERNAME"
-const HEADER_JWT = "Authentication"
+const HEADER_JWT = "Authorization"
 const jwtTokenTimeToLive = 24 * time.Hour
+const jwtHeaderPrefix = "Bearer "
 
 var authenticationError = errors.New("authentication failed")
 
@@ -63,22 +65,26 @@ func (a Authenticator) AuthenticateRequest(r *http.Request) (string, error) {
 		return "", authenticationError
 	}
 
-	token, err := request.ParseFromRequest(r, request.HeaderExtractor{HEADER_JWT}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+	jwtHeader := r.Header.Get(HEADER_JWT)
+	if "" != jwtHeader && strings.HasPrefix(jwtHeader, jwtHeaderPrefix) {
+		splittedHeader := strings.SplitAfter(jwtHeader, jwtHeaderPrefix)
+		token, err := jwt.Parse(splittedHeader[1], func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return a.PublicKey, nil
+		})
+		if err != nil {
+			return "", errors.Wrapf(err, "parsing token from '%s' header", HEADER_JWT)
 		}
-		return a.PublicKey, nil
-	})
-	if err != nil {
-		return "", errors.Wrapf(err, "Parsing token from %s", HEADER_JWT)
-	}
 
-	if token.Valid {
-		claims, ok := token.Claims.(jwt.StandardClaims)
-		if !ok {
-			return "", errors.Wrapf(err, "obtaining standard claims struct from token claims")
+		if token.Valid {
+			claims, ok := token.Claims.(jwt.StandardClaims)
+			if !ok {
+				return "", errors.Wrapf(err, "obtaining standard claims struct from token claims")
+			}
+			return claims.Subject, nil
 		}
-		return claims.Subject, nil
 	}
 
 	return "", errors.New("no authentication info or unsupported authentication method")

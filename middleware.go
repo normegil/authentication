@@ -33,6 +33,7 @@ func (a Authenticator) Authenticate(h http.Handler) http.Handler {
 		username, err := a.AuthenticateRequest(r)
 		if nil != err {
 			a.ErrorHandler.Handle(w, errors.Wrapf(err, "Could not authenticate request"))
+			return
 		}
 
 		token, err := a.EmitToken(a.PrivateKey, jwt.StandardClaims{
@@ -41,6 +42,7 @@ func (a Authenticator) Authenticate(h http.Handler) http.Handler {
 		})
 		if err != nil {
 			a.ErrorHandler.Handle(w, errors.Wrapf(err, "Could not emit JWT token"))
+			return
 		}
 		w.Header().Add(HEADER_JWT, "Bearer "+token)
 

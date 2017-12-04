@@ -3,8 +3,6 @@ package authentication
 import (
 	"net/http"
 
-	"context"
-
 	"crypto/ecdsa"
 	"fmt"
 	"time"
@@ -16,7 +14,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-const USERNAME_KEY = "USERNAME"
 const HEADER_JWT = "Authorization"
 const jwtTokenTimeToLive = 24 * time.Hour
 const jwtHeaderPrefix = "Bearer "
@@ -30,26 +27,25 @@ type Authenticator struct {
 	PublicKey    *ecdsa.PublicKey
 }
 
-func (a Authenticator) Authenticate(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		username, err := a.AuthenticateRequest(r)
-		if nil != err {
-			a.ErrorHandler.Handle(w, errors.Wrapf(err, "Could not authenticate request"))
-			return
-		}
+type AuthenticationInfo struct {
+	Username string
+	Token    string
+}
 
-		token, err := a.EmitToken(a.PrivateKey, jwt.StandardClaims{
-			Subject:   username,
-			ExpiresAt: time.Now().Add(jwtTokenTimeToLive).Unix(),
-		})
-		if err != nil {
-			a.ErrorHandler.Handle(w, errors.Wrapf(err, "Could not emit JWT token"))
-			return
-		}
-		w.Header().Add(HEADER_JWT, "Bearer "+token)
+func (a Authenticator) Authenticate(r *http.Request) (AuthenticationInfo, error) {
+	username, err := a.AuthenticateRequest(r)
+	if nil != err {
+		return AuthenticationInfo{}, errors.Wrapf(err, "Could not authenticate request")
+	}
 
-		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), USERNAME_KEY, username)))
+	token, err := a.EmitToken(a.PrivateKey, jwt.StandardClaims{
+		Subject:   username,
+		ExpiresAt: time.Now().Add(jwtTokenTimeToLive).Unix(),
 	})
+	if err != nil {
+		return AuthenticationInfo{}, errors.Wrapf(err, "Could not emit JWT token")
+	}
+	return AuthenticationInfo{username, token}, nil
 }
 
 func (a Authenticator) AuthenticateRequest(r *http.Request) (string, error) {
